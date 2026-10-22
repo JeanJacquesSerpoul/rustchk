@@ -1,0 +1,2 @@
+# Les signatures portent sur les octets exacts : ne jamais convertir les fins de ligne.
+src-tauri/tests/fixtures/* -text

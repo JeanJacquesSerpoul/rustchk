@@ -1,0 +1,12 @@
+[package]
+name = "rustchk-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/JeanJacquesSerpoul/rustchk"
+readme = "../README.md"
+publish = false
+description = "Types et analyse de checksums partagés entre l'interface et le backend"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
