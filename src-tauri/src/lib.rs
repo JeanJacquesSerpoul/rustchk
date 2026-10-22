@@ -10,6 +10,7 @@ use std::sync::Arc;
 use rustchk_core::{AppError, FileReport, KeyInfo, Lang, Progress, Sidecar, SignatureStatus};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_window_state::StateFlags;
 
 /// Chaque calcul reçoit un numéro ; incrémenter le compteur annule le précédent.
 #[derive(Default)]
@@ -181,6 +182,13 @@ pub fn run() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Mémorise la taille (et l'état agrandi) de la fenêtre entre deux lancements ; pas la position,
+        // pour ne jamais rouvrir hors écran après un changement de moniteur.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::SIZE | StateFlags::MAXIMIZED)
+                .build(),
+        )
         .manage(HashJobs::default())
         .invoke_handler(tauri::generate_handler![
             initial_file,

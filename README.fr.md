@@ -19,6 +19,7 @@ Petite application de bureau écrite en Rust avec [Tauri 2](https://tauri.app) e
 - **Authentification OpenPGP** de ce fichier de checksums (voir ci-dessous).
 - **Intégration à l'explorateur Windows** : entrée « Vérifier le checksum » dans le menu contextuel de tous les fichiers.
 - **Glisser-déposer**, ou ouverture depuis la ligne de commande / le menu contextuel.
+- **Mémorise la taille de la fenêtre** (et l'état agrandi) d'un lancement à l'autre.
 - Interface en **français et en anglais**, changement à la volée.
 
 ## Authentifier le fichier de checksums (OpenPGP)
@@ -77,6 +78,20 @@ cargo test --workspace # tests unitaires
 
 Sous PowerShell, si `trunk` échoue avec `invalid value '1' for '--no-color'`, définir `NO_COLOR=true` avant.
 
+## Construire un installeur
+
+Mêmes prérequis que ci-dessus. Chaque script construit l'interface et l'application en release, les empaquette,
+puis copie le résultat dans `release/` avec un fichier `.sha256` (que RustChk sait vérifier lui-même).
+
+| Plateforme | Commande | Résultat |
+| --- | --- | --- |
+| Windows | `.\scripts\build-installer.ps1 [-OutDir DIR] [-RunTests]` | Installeur NSIS `RustChk_<version>_x64-setup.exe` |
+| Linux | `scripts/build-appimage.sh [--out DIR] [--test]` | `RustChk_<version>_amd64.AppImage` |
+
+Sous Linux, installer d'abord les bibliothèques système (Debian/Ubuntu) :
+`sudo apt install build-essential curl wget file libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libssl-dev librsvg2-dev patchelf`.
+Les installeurs ne sont pas signés.
+
 ## Intégration continue
 
 [GitHub Actions](.github/workflows/ci.yml) s'exécute à chaque push sur `main` et à chaque pull request :
@@ -84,7 +99,7 @@ Sous PowerShell, si `trunk` échoue avec `invalid value '1' for '--no-color'`, d
 | Job | Vérification |
 | --- | --- |
 | **Format** | `cargo fmt --check` |
-| **Linux** (Ubuntu 22.04) · **macOS** · **Windows** | construit l'interface avec Trunk, `clippy -D warnings`, `cargo test --workspace`, puis empaquète l'application (`.deb` / `.app` / installeur NSIS) et la publie en artefact conservé 7 jours |
+| **Linux** (Ubuntu 22.04) · **macOS** · **Windows** | construit l'interface avec Trunk, `clippy -D warnings`, `cargo test --workspace`, puis empaquète l'application (AppImage / `.app` / installeur NSIS, les deux premiers via les scripts ci-dessus) et la publie en artefact conservé 7 jours |
 
 L'intégration au menu contextuel de l'explorateur n'existe que sous Windows ; sous Linux et macOS l'application
 se compile et fonctionne sans elle. Les paquets ne sont pas signés.

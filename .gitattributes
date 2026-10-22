@@ -1,2 +1,5 @@
 # Les signatures portent sur les octets exacts : ne jamais convertir les fins de ligne.
 src-tauri/tests/fixtures/* -text
+
+# Scripts shell : toujours LF (sinon "bash\r: command not found" sous Linux)
+*.sh text eol=lf
