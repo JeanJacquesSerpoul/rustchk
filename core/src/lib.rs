@@ -43,11 +43,7 @@ impl Algo {
 
     /// Reconnaît `sha256`, `SHA-256`, `Sha_256`, `md5`… (insensible à la casse).
     pub fn from_name(name: &str) -> Option<Algo> {
-        let n: String = name
-            .chars()
-            .filter(|c| *c != '-' && *c != '_')
-            .collect::<String>()
-            .to_ascii_lowercase();
+        let n: String = name.chars().filter(|c| *c != '-' && *c != '_').collect::<String>().to_ascii_lowercase();
         match n.as_str() {
             "md5" => Some(Algo::Md5),
             "sha1" => Some(Algo::Sha1),
@@ -144,13 +140,19 @@ pub enum SignatureStatus {
 pub enum InvalidReason {
     /// Le contenu ne correspond pas à la signature.
     ContentMismatch,
-    KeyRevoked { key_id: String },
+    KeyRevoked {
+        key_id: String,
+    },
     /// Message signé en clair illisible, ou texte hors du bloc signé.
     MalformedCleartext,
     NotUtf8,
     TooLarge,
-    SignatureUnreadable { detail: String },
-    ReadFailed { detail: String },
+    SignatureUnreadable {
+        detail: String,
+    },
+    ReadFailed {
+        detail: String,
+    },
 }
 
 /// Langue de l'interface.
@@ -196,17 +198,31 @@ pub enum AppError {
     /// Un calcul a été remplacé par un autre ou annulé : pas une erreur à afficher.
     Cancelled,
     NotAFile,
-    Io { detail: String },
-    KeyNotPublic { detail: String },
-    KeyUnreadable { detail: String },
-    KeyBindingInvalid { detail: String },
+    Io {
+        detail: String,
+    },
+    KeyNotPublic {
+        detail: String,
+    },
+    KeyUnreadable {
+        detail: String,
+    },
+    KeyBindingInvalid {
+        detail: String,
+    },
     NoPublicKey,
     KeyFileTooLarge,
-    KeyringWrite { detail: String },
-    KeyExport { detail: String },
+    KeyringWrite {
+        detail: String,
+    },
+    KeyExport {
+        detail: String,
+    },
     InvalidFingerprint,
     ShellUnsupported,
-    Internal { detail: String },
+    Internal {
+        detail: String,
+    },
 }
 
 /// Vrai si une clé expirant à `expires` était déjà expirée à `signed_at` (secondes Unix).
@@ -279,11 +295,7 @@ pub fn parse_line(line: &str) -> Option<Entry> {
             let mut parts = rest.splitn(2, char::is_whitespace);
             let token = parts.next().unwrap_or("");
             let file = parts.next().and_then(clean_file_name);
-            return clean_hash(token, Some(hint)).map(|(_, hash)| Entry {
-                algo: Some(hint),
-                hash,
-                file,
-            });
+            return clean_hash(token, Some(hint)).map(|(_, hash)| Entry { algo: Some(hint), hash, file });
         }
     }
 
@@ -305,13 +317,8 @@ pub fn parse_expected(input: &str) -> Result<Expected, ParseError> {
         let algo = Algo::from_hex_len(entry.hash.len()).ok_or(ParseError::Invalid)?;
         return Ok(Expected { algo, hash: entry.hash });
     }
-    let compact: String = input
-        .chars()
-        .filter(|c| !c.is_whitespace() && *c != ':')
-        .collect();
-    clean_hash(&compact, None)
-        .map(|(algo, hash)| Expected { algo, hash })
-        .ok_or(ParseError::Invalid)
+    let compact: String = input.chars().filter(|c| !c.is_whitespace() && *c != ':').collect();
+    clean_hash(&compact, None).map(|(algo, hash)| Expected { algo, hash }).ok_or(ParseError::Invalid)
 }
 
 /// Cherche l'empreinte de `file_name` dans le contenu d'un fichier de checksums.
@@ -322,11 +329,7 @@ pub fn find_entry(content: &str, file_name: &str, lenient: bool) -> Option<Entry
     entries
         .iter()
         .find(|e| e.file.as_deref().is_some_and(|f| f.eq_ignore_ascii_case(file_name)))
-        .or_else(|| {
-            entries
-                .iter()
-                .find(|e| e.file.is_none() || (lenient && entries.len() == 1))
-        })
+        .or_else(|| entries.iter().find(|e| e.file.is_none() || (lenient && entries.len() == 1)))
         .cloned()
 }
 
@@ -376,11 +379,8 @@ mod tests {
 
     #[test]
     fn parses_spaced_certutil_output() {
-        let spaced: Vec<String> = SHA256_ABC
-            .as_bytes()
-            .chunks(2)
-            .map(|c| String::from_utf8_lossy(c).into_owned())
-            .collect();
+        let spaced: Vec<String> =
+            SHA256_ABC.as_bytes().chunks(2).map(|c| String::from_utf8_lossy(c).into_owned()).collect();
         let e = parse_expected(&spaced.join(" ")).unwrap();
         assert_eq!(e.hash, SHA256_ABC);
         let colons = spaced.join(":");

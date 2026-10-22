@@ -22,10 +22,7 @@ impl T {
         self.pick("RustChk — Vérification de checksum", "RustChk — Checksum verification")
     }
     pub fn subtitle(self) -> &'static str {
-        self.pick(
-            "Vérifiez l'intégrité d'un fichier téléchargé",
-            "Check the integrity of a downloaded file",
-        )
+        self.pick("Vérifiez l'intégrité d'un fichier téléchargé", "Check the integrity of a downloaded file")
     }
     pub fn language(self) -> &'static str {
         self.pick("Langue", "Language")
@@ -50,10 +47,7 @@ impl T {
         self.pick(format!("{size} · calculé en {time}"), format!("{size} · computed in {time}"))
     }
     pub fn hashing_progress(self, percent: f64) -> String {
-        self.pick(
-            format!("Calcul des empreintes… {percent:.0} %"),
-            format!("Computing checksums… {percent:.0}%"),
-        )
+        self.pick(format!("Calcul des empreintes… {percent:.0} %"), format!("Computing checksums… {percent:.0}%"))
     }
     pub fn cancel(self) -> &'static str {
         self.pick("Annuler", "Cancel")
@@ -80,10 +74,7 @@ impl T {
         self.pick("Calcul en cours…", "Computing…")
     }
     pub fn verdict_nothing(self) -> &'static str {
-        self.pick(
-            "Collez l'empreinte attendue pour la comparer.",
-            "Paste the expected checksum to compare it.",
-        )
+        self.pick("Collez l'empreinte attendue pour la comparer.", "Paste the expected checksum to compare it.")
     }
     pub fn verdict_invalid(self) -> &'static str {
         self.pick(
@@ -185,10 +176,9 @@ impl T {
                 "la signature ne correspond pas au contenu du fichier : il a été modifié ou est corrompu.".into(),
                 "the signature does not match the file content: it was modified or is corrupted.".into(),
             ),
-            InvalidReason::KeyRevoked { key_id } => self.pick(
-                format!("la clé {key_id} a été révoquée."),
-                format!("key {key_id} has been revoked."),
-            ),
+            InvalidReason::KeyRevoked { key_id } => {
+                self.pick(format!("la clé {key_id} a été révoquée."), format!("key {key_id} has been revoked."))
+            }
             InvalidReason::MalformedCleartext => self.pick(
                 "le message signé en clair est illisible (tout texte hors du bloc signé est refusé).".into(),
                 "the clear-signed message is malformed (any text outside the signed block is rejected).".into(),
@@ -205,10 +195,9 @@ impl T {
                 format!("le fichier de signature est illisible ({detail})."),
                 format!("the signature file cannot be read ({detail})."),
             ),
-            InvalidReason::ReadFailed { detail } => self.pick(
-                format!("lecture impossible : {detail}."),
-                format!("could not read the file: {detail}."),
-            ),
+            InvalidReason::ReadFailed { detail } => {
+                self.pick(format!("lecture impossible : {detail}."), format!("could not read the file: {detail}."))
+            }
         }
     }
 
@@ -273,7 +262,9 @@ impl T {
         match error {
             AppError::Cancelled => self.pick("Opération annulée.".into(), "Operation cancelled.".into()),
             AppError::NotAFile => self.pick("ce n'est pas un fichier.".into(), "this is not a file.".into()),
-            AppError::Io { detail } => self.pick(format!("Lecture impossible : {detail}"), format!("Could not read: {detail}")),
+            AppError::Io { detail } => {
+                self.pick(format!("Lecture impossible : {detail}"), format!("Could not read: {detail}"))
+            }
             AppError::KeyNotPublic { detail } => self.pick(
                 format!("Ce fichier n'est pas une clé publique OpenPGP ({detail})."),
                 format!("This file is not an OpenPGP public key ({detail})."),
@@ -306,10 +297,9 @@ impl T {
                 "L'intégration à l'explorateur n'est disponible que sous Windows.".into(),
                 "File explorer integration is only available on Windows.".into(),
             ),
-            AppError::Internal { detail } => self.pick(
-                format!("Erreur interne : {detail}"),
-                format!("Internal error: {detail}"),
-            ),
+            AppError::Internal { detail } => {
+                self.pick(format!("Erreur interne : {detail}"), format!("Internal error: {detail}"))
+            }
         }
     }
 }

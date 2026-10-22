@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use rustchk_core::{AppError, FileReport, KeyInfo, Lang, Progress, SignatureStatus, Sidecar};
+use rustchk_core::{AppError, FileReport, KeyInfo, Lang, Progress, Sidecar, SignatureStatus};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
@@ -18,11 +18,7 @@ struct HashJobs(Arc<AtomicU64>);
 /// Fichier passé en argument (menu contextuel, « Ouvrir avec », glisser sur l'exécutable).
 #[tauri::command]
 fn initial_file() -> Option<String> {
-    std::env::args_os()
-        .skip(1)
-        .map(PathBuf::from)
-        .find(|p| p.is_file())
-        .map(|p| p.display().to_string())
+    std::env::args_os().skip(1).map(PathBuf::from).find(|p| p.is_file()).map(|p| p.display().to_string())
 }
 
 // Les seuls textes rédigés côté Rust sont ceux des fenêtres natives ; le reste est traduit par l'interface.
@@ -107,10 +103,7 @@ fn find_sidecar(path: String) -> Option<Sidecar> {
 
 /// Trousseau OpenPGP de l'application (`%APPDATA%\<identifiant>\keys`).
 fn keyring(app: &AppHandle) -> Result<openpgp::Keyring, AppError> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::Internal { detail: e.to_string() })?;
+    let dir = app.path().app_data_dir().map_err(|e| AppError::Internal { detail: e.to_string() })?;
     Ok(openpgp::Keyring::new(dir.join("keys")))
 }
 
@@ -152,7 +145,11 @@ fn shell_status() -> Result<bool, AppError> {
 /// Ajoute (ou met à jour le libellé de) / retire l'entrée du menu contextuel.
 #[tauri::command]
 fn shell_set(enabled: bool, lang: Lang) -> Result<bool, AppError> {
-    if enabled { shell::register(lang)? } else { shell::unregister()? }
+    if enabled {
+        shell::register(lang)?
+    } else {
+        shell::unregister()?
+    }
     shell::is_registered()
 }
 

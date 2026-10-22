@@ -7,9 +7,8 @@ use std::path::Path;
 use rustchk_core::{find_entry, Sidecar};
 
 /// Extensions de fichiers de checksum propres à un fichier : `<fichier>.<ext>`.
-const PER_FILE_EXTENSIONS: [&str; 9] = [
-    "sha256", "sha512", "sha1", "md5", "sha384", "sha256sum", "sha512sum", "sha1sum", "md5sum",
-];
+const PER_FILE_EXTENSIONS: [&str; 9] =
+    ["sha256", "sha512", "sha1", "md5", "sha384", "sha256sum", "sha512sum", "sha1sum", "md5sum"];
 
 /// Noms (en minuscules) de fichiers de checksums couvrant tout un dossier.
 const SUMS_FILES: [&str; 14] = [
@@ -49,11 +48,7 @@ fn read_small(path: &Path) -> Option<String> {
 }
 
 fn sidecar(path: &Path, hash: String) -> Option<Sidecar> {
-    Some(Sidecar {
-        source: path.file_name()?.to_string_lossy().into_owned(),
-        path: path.display().to_string(),
-        hash,
-    })
+    Some(Sidecar { source: path.file_name()?.to_string_lossy().into_owned(), path: path.display().to_string(), hash })
 }
 
 pub fn find(path: &Path) -> Option<Sidecar> {
