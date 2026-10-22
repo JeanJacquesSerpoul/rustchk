@@ -8,6 +8,7 @@
 use rustchk_core::{AppError, Lang};
 
 /// Libellé du verbe dans le menu contextuel.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn menu_label(lang: Lang) -> &'static str {
     match lang {
         Lang::Fr => "Vérifier le checksum (RustChk)",
@@ -67,11 +68,7 @@ mod imp {
 
     /// Langue du système (paramètres régionaux de l'utilisateur), ex. `fr-FR`.
     pub fn system_locale() -> Option<String> {
-        RegKey::predef(HKEY_CURRENT_USER)
-            .open_subkey(r"Control Panel\International")
-            .ok()?
-            .get_value("LocaleName")
-            .ok()
+        RegKey::predef(HKEY_CURRENT_USER).open_subkey(r"Control Panel\International").ok()?.get_value("LocaleName").ok()
     }
 }
 

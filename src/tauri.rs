@@ -70,9 +70,8 @@ fn storage() -> Option<web_sys::Storage> {
 /// Langue au démarrage : choix précédent de l'utilisateur, sinon langue du système/navigateur
 /// (français si c'est la sienne, anglais pour toute autre).
 pub fn initial_lang() -> Lang {
-    let saved = storage()
-        .and_then(|s| s.get_item(LANG_STORAGE_KEY).ok().flatten())
-        .and_then(|tag| Lang::from_tag(&tag));
+    let saved =
+        storage().and_then(|s| s.get_item(LANG_STORAGE_KEY).ok().flatten()).and_then(|tag| Lang::from_tag(&tag));
     saved.unwrap_or_else(|| {
         let browser = web_sys::window().and_then(|w| w.navigator().language()).unwrap_or_default();
         Lang::detect(&browser)

@@ -95,9 +95,7 @@ pub fn hash_file(
         drop(senders);
         let mut digests = Vec::with_capacity(handles.len());
         for handle in handles {
-            let digest = handle
-                .join()
-                .map_err(|_| io::Error::other("hash worker thread panicked"))?;
+            let digest = handle.join().map_err(|_| io::Error::other("hash worker thread panicked"))?;
             digests.push(digest);
         }
         if let Some(e) = read_error {
@@ -116,10 +114,7 @@ pub fn hash_file(
 
     Ok(Some(FileReport {
         path: path.display().to_string(),
-        name: path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default(),
+        name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         size: total,
         elapsed_ms: started.elapsed().as_millis() as u64,
         hashes: Hashes { md5, sha1, sha256, sha384, sha512 },
@@ -145,10 +140,7 @@ mod tests {
         assert_eq!(report.size, 3);
         assert_eq!(report.hashes.md5, "900150983cd24fb0d6963f7d28e17f72");
         assert_eq!(report.hashes.sha1, "a9993e364706816aba3e25717850c26c9cd0d89d");
-        assert_eq!(
-            report.hashes.sha256,
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
+        assert_eq!(report.hashes.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         assert_eq!(
             report.hashes.sha384,
             "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7"

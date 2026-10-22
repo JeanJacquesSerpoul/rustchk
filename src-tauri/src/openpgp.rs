@@ -29,10 +29,7 @@ fn issued_by(sig: &Signature, key: &impl KeyDetails) -> bool {
     let fingerprint = key.fingerprint();
     let key_id = key.legacy_key_id();
     sig.issuer_fingerprint().iter().any(|f| f.as_bytes() == fingerprint.as_bytes())
-        || sig
-            .issuer_key_id()
-            .iter()
-            .any(|k| AsRef::<[u8]>::as_ref(*k) == AsRef::<[u8]>::as_ref(&key_id))
+        || sig.issuer_key_id().iter().any(|k| AsRef::<[u8]>::as_ref(*k) == AsRef::<[u8]>::as_ref(&key_id))
 }
 
 fn issued_by_cert(sig: &Signature, cert: &SignedPublicKey) -> bool {
@@ -74,12 +71,7 @@ pub fn key_info(key: &SignedPublicKey) -> KeyInfo {
     let created = u64::from(key.created_at().as_secs());
     KeyInfo {
         key_id,
-        user_ids: key
-            .details
-            .users
-            .iter()
-            .map(|u| String::from_utf8_lossy(u.id.id()).into_owned())
-            .collect(),
+        user_ids: key.details.users.iter().map(|u| String::from_utf8_lossy(u.id.id()).into_owned()).collect(),
         created: Some(created),
         expires: key_expiration(key, created),
         revoked: !key.details.revocation_signatures.is_empty(),
@@ -94,8 +86,7 @@ pub fn parse_public_keys(data: &[u8]) -> Result<Vec<SignedPublicKey>, AppError> 
     let mut keys = Vec::new();
     for key in parsed {
         let key = key.map_err(|e| AppError::KeyUnreadable { detail: e.to_string() })?;
-        key.verify_bindings()
-            .map_err(|e| AppError::KeyBindingInvalid { detail: e.to_string() })?;
+        key.verify_bindings().map_err(|e| AppError::KeyBindingInvalid { detail: e.to_string() })?;
         keys.push(key);
     }
     if keys.is_empty() {
@@ -159,9 +150,7 @@ impl Keyring {
             return Err(AppError::InvalidFingerprint);
         }
         match fs::remove_file(self.path_for(&fingerprint.to_ascii_uppercase())) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                Err(AppError::KeyringWrite { detail: e.to_string() })
-            }
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(AppError::KeyringWrite { detail: e.to_string() }),
             _ => Ok(()),
         }
     }
@@ -197,9 +186,7 @@ fn check_signatures(sigs: &[&Signature], data: &[u8], keys: &[SignedPublicKey]) 
             }
             let info = key_info(key);
             if info.revoked {
-                return SignatureStatus::Invalid {
-                    reason: InvalidReason::KeyRevoked { key_id: info.key_id },
-                };
+                return SignatureStatus::Invalid { reason: InvalidReason::KeyRevoked { key_id: info.key_id } };
             }
             let signed_at = sig.created().map(|t| u64::from(t.as_secs()));
             return SignatureStatus::Valid {
@@ -244,9 +231,7 @@ fn verify_clearsigned(content: &[u8], keys: &[SignedPublicKey]) -> SignatureStat
 fn verify_detached(content: &[u8], signature: &[u8], keys: &[SignedPublicKey]) -> SignatureStatus {
     match DetachedSignature::from_reader_single(Cursor::new(signature.to_vec())) {
         Ok((detached, _)) => check_signatures(&[&detached.signature], content, keys),
-        Err(e) => SignatureStatus::Invalid {
-            reason: InvalidReason::SignatureUnreadable { detail: e.to_string() },
-        },
+        Err(e) => SignatureStatus::Invalid { reason: InvalidReason::SignatureUnreadable { detail: e.to_string() } },
     }
 }
 
@@ -434,10 +419,7 @@ mod tests {
         ring.import(RSA_KEY).unwrap();
         assert_eq!(imported[0].fingerprint, ED_FPR);
         assert_eq!(ring.list().len(), 2);
-        assert!(matches!(
-            verify_checksum_file_from(&ring, ED_SIG),
-            SignatureStatus::Valid { .. }
-        ));
+        assert!(matches!(verify_checksum_file_from(&ring, ED_SIG), SignatureStatus::Valid { .. }));
 
         assert!(ring.remove("../../etc").is_err());
         assert!(ring.remove("").is_err());

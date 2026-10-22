@@ -1,8 +1,8 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use rustchk_core::{
-    matches, parse_expected, Algo, AppError, Expected, FileReport, KeyInfo, Lang, ParseError, Progress,
-    SignatureStatus, Sidecar,
+    matches, parse_expected, Algo, AppError, Expected, FileReport, KeyInfo, Lang, ParseError, Progress, Sidecar,
+    SignatureStatus,
 };
 use serde::{Deserialize, Serialize};
 
@@ -76,19 +76,12 @@ enum ShellMsg {
 
 /// `ABCD1234…` → `ABCD 1234 …` pour comparer à l'œil avec l'empreinte publiée.
 fn group_fingerprint(fingerprint: &str) -> String {
-    fingerprint
-        .as_bytes()
-        .chunks(4)
-        .map(|c| String::from_utf8_lossy(c).into_owned())
-        .collect::<Vec<_>>()
-        .join(" ")
+    fingerprint.as_bytes().chunks(4).map(|c| String::from_utf8_lossy(c).into_owned()).collect::<Vec<_>>().join(" ")
 }
 
 fn format_date(lang: Lang, unix_secs: u64) -> String {
     let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(unix_secs as f64 * 1000.0));
-    date.to_locale_date_string(date_locale(lang), &wasm_bindgen::JsValue::UNDEFINED)
-        .as_string()
-        .unwrap_or_default()
+    date.to_locale_date_string(date_locale(lang), &wasm_bindgen::JsValue::UNDEFINED).as_string().unwrap_or_default()
 }
 
 #[component]
@@ -112,11 +105,7 @@ pub fn App() -> impl IntoView {
     let expected = Memo::new(move |_| expected_text.with(|t| parse_expected(t)));
     let verdict = Memo::new(move |_| report.with(|r| verdict_for(r.as_ref(), &expected.get())));
     // La carte d'authenticité ne vaut que tant que l'empreinte comparée est celle du fichier signé.
-    let sidecar_in_use = Memo::new(move |_| {
-        sidecar
-            .get()
-            .filter(|s| expected.get().is_ok_and(|e| e.hash == s.hash))
-    });
+    let sidecar_in_use = Memo::new(move |_| sidecar.get().filter(|s| expected.get().is_ok_and(|e| e.hash == s.hash)));
 
     // Langue du document, titre de la page et de la fenêtre, préférence mémorisée.
     Effect::new(move |_| {
@@ -296,10 +285,7 @@ pub fn App() -> impl IntoView {
     });
 
     let percent = move || {
-        progress
-            .get()
-            .map(|p| if p.total == 0 { 0.0 } else { p.done as f64 / p.total as f64 * 100.0 })
-            .unwrap_or(0.0)
+        progress.get().map(|p| if p.total == 0 { 0.0 } else { p.done as f64 / p.total as f64 * 100.0 }).unwrap_or(0.0)
     };
 
     view! {
@@ -547,13 +533,7 @@ mod tests {
     #[test]
     fn verdict_follows_expected_text() {
         let hashes = Hashes { md5: "9".repeat(32), ..Default::default() };
-        let report = FileReport {
-            path: String::new(),
-            name: String::new(),
-            size: 0,
-            elapsed_ms: 0,
-            hashes,
-        };
+        let report = FileReport { path: String::new(), name: String::new(), size: 0, elapsed_ms: 0, hashes };
         assert_eq!(verdict_for(None, &parse_expected("")), Verdict::Pending);
         assert_eq!(verdict_for(Some(&report), &parse_expected("")), Verdict::NothingToCompare);
         assert_eq!(verdict_for(Some(&report), &parse_expected("zz")), Verdict::Invalid);
