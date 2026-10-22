@@ -5,6 +5,7 @@
 Verify the checksum of a downloaded file — and check that the checksum file itself is authentic.
 A small desktop app written in Rust with [Tauri 2](https://tauri.app) and [Leptos 0.8](https://leptos.dev).
 
+[![CI](https://github.com/JeanJacquesSerpoul/rustchk/actions/workflows/ci.yml/badge.svg)](https://github.com/JeanJacquesSerpoul/rustchk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Features
@@ -75,6 +76,18 @@ cargo test --workspace # unit tests
 ```
 
 If `trunk` fails under PowerShell with `invalid value '1' for '--no-color'`, set `NO_COLOR=true` first.
+
+## Continuous integration
+
+[GitHub Actions](.github/workflows/ci.yml) runs on every push to `main` and on every pull request:
+
+| Job | What it checks |
+| --- | --- |
+| **Format** | `cargo fmt --check` |
+| **Linux** (Ubuntu 22.04) · **macOS** · **Windows** | builds the UI with Trunk, `clippy -D warnings`, `cargo test --workspace`, then packages the app (`.deb` / `.app` / NSIS installer) and uploads it as a 7-day artifact |
+
+The Explorer context-menu integration is Windows-only; on Linux and macOS the app builds and runs without it.
+Packages are unsigned.
 
 ## Project layout
 

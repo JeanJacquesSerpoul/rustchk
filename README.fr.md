@@ -5,6 +5,7 @@
 Vérifie le checksum d'un fichier téléchargé — et s'assure que le fichier de checksums lui-même est authentique.
 Petite application de bureau écrite en Rust avec [Tauri 2](https://tauri.app) et [Leptos 0.8](https://leptos.dev).
 
+[![CI](https://github.com/JeanJacquesSerpoul/rustchk/actions/workflows/ci.yml/badge.svg)](https://github.com/JeanJacquesSerpoul/rustchk/actions/workflows/ci.yml)
 [![Licence : MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 
 ## Fonctionnalités
@@ -75,6 +76,18 @@ cargo test --workspace # tests unitaires
 ```
 
 Sous PowerShell, si `trunk` échoue avec `invalid value '1' for '--no-color'`, définir `NO_COLOR=true` avant.
+
+## Intégration continue
+
+[GitHub Actions](.github/workflows/ci.yml) s'exécute à chaque push sur `main` et à chaque pull request :
+
+| Job | Vérification |
+| --- | --- |
+| **Format** | `cargo fmt --check` |
+| **Linux** (Ubuntu 22.04) · **macOS** · **Windows** | construit l'interface avec Trunk, `clippy -D warnings`, `cargo test --workspace`, puis empaquète l'application (`.deb` / `.app` / installeur NSIS) et la publie en artefact conservé 7 jours |
+
+L'intégration au menu contextuel de l'explorateur n'existe que sous Windows ; sous Linux et macOS l'application
+se compile et fonctionne sans elle. Les paquets ne sont pas signés.
 
 ## Structure du projet
 
