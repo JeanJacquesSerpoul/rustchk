@@ -19,6 +19,7 @@ A small desktop app written in Rust with [Tauri 2](https://tauri.app) and [Lepto
 - **OpenPGP authentication** of that checksum file (see below).
 - **Windows Explorer integration**: a "Verify checksum" entry in the context menu of every file.
 - **Drag and drop**, or open from the command line / context menu.
+- **Remembers the window size** (and maximized state) between launches.
 - **English and French** interface, switchable on the fly.
 
 ## Authenticating the checksum file (OpenPGP)
@@ -77,6 +78,20 @@ cargo test --workspace # unit tests
 
 If `trunk` fails under PowerShell with `invalid value '1' for '--no-color'`, set `NO_COLOR=true` first.
 
+## Building installers
+
+Same prerequisites as above. Each script builds the UI and the app in release mode, packages it, and copies the
+result to `release/` next to a `.sha256` file (which RustChk can verify itself).
+
+| Platform | Command | Output |
+| --- | --- | --- |
+| Windows | `.\scripts\build-installer.ps1 [-OutDir DIR] [-RunTests]` | NSIS installer `RustChk_<version>_x64-setup.exe` |
+| Linux | `scripts/build-appimage.sh [--out DIR] [--test]` | `RustChk_<version>_amd64.AppImage` |
+
+On Linux, install the system libraries first (Debian/Ubuntu):
+`sudo apt install build-essential curl wget file libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libssl-dev librsvg2-dev patchelf`.
+Installers are unsigned.
+
 ## Continuous integration
 
 [GitHub Actions](.github/workflows/ci.yml) runs on every push to `main` and on every pull request:
@@ -84,7 +99,7 @@ If `trunk` fails under PowerShell with `invalid value '1' for '--no-color'`, set
 | Job | What it checks |
 | --- | --- |
 | **Format** | `cargo fmt --check` |
-| **Linux** (Ubuntu 22.04) · **macOS** · **Windows** | builds the UI with Trunk, `clippy -D warnings`, `cargo test --workspace`, then packages the app (`.deb` / `.app` / NSIS installer) and uploads it as a 7-day artifact |
+| **Linux** (Ubuntu 22.04) · **macOS** · **Windows** | builds the UI with Trunk, `clippy -D warnings`, `cargo test --workspace`, then packages the app (AppImage / `.app` / NSIS installer, the first two through the scripts above) and uploads it as a 7-day artifact |
 
 The Explorer context-menu integration is Windows-only; on Linux and macOS the app builds and runs without it.
 Packages are unsigned.

@@ -37,16 +37,13 @@ jobs:
         include:
           - name: Linux
             os: ubuntu-22.04
-            bundles: deb
-            artifact: target/release/bundle/deb/*.deb
+            artifact: release/*
           - name: macOS
             os: macos-latest
-            bundles: app
             artifact: target/release/bundle/macos/*.app
           - name: Windows
             os: windows-latest
-            bundles: nsis
-            artifact: target/release/bundle/nsis/*.exe
+            artifact: release/*
     steps:
       - uses: actions/checkout@v7
 
@@ -81,8 +78,19 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
-      - name: Empaqueter (${{ matrix.bundles }})
-        run: tauri build --bundles ${{ matrix.bundles }}
+      # Linux et Windows passent par les scripts de `scripts/` : ils sont ainsi testés à chaque changement.
+      - name: Empaqueter l'AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: bash scripts/build-appimage.sh --out release
+
+      - name: Empaqueter l'installeur NSIS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/build-installer.ps1 -OutDir release
+
+      - name: Empaqueter l'application (macOS)
+        if: runner.os == 'macOS'
+        run: tauri build --bundles app
 
       - name: Archiver le paquet
         uses: actions/upload-artifact@v7
