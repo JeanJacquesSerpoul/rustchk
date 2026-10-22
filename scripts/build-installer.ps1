@@ -71,9 +71,11 @@ if (Test-Command rustup) {
 # `cargo tauri` (cargo install tauri-cli) or the `tauri` command (npm i -g @tauri-apps/cli).
 & cargo tauri --version *> $null
 if ($LASTEXITCODE -eq 0) {
-    $tauri = @('cargo', 'tauri')
+    $tauriCommand = 'cargo'
+    $tauriPrefix = @('tauri')
 } elseif (Test-Command tauri) {
-    $tauri = @('tauri')
+    $tauriCommand = 'tauri'
+    $tauriPrefix = @()
 } else {
     throw 'Tauri CLI not found. Run: cargo install tauri-cli   (or: npm i -g @tauri-apps/cli@2)'
 }
@@ -95,8 +97,7 @@ try {
     # --- Installer ---------------------------------------------------------------------------------
 
     Write-Step 'Building the NSIS installer (this takes a few minutes the first time)'
-    $buildArgs = @($tauri[1..($tauri.Length - 1)]) + @('build', '--bundles', 'nsis')
-    Invoke-Native $tauri[0] $buildArgs
+    Invoke-Native $tauriCommand ($tauriPrefix + @('build', '--bundles', 'nsis'))
 
     $installer = Get-ChildItem -Path (Join-Path $TargetDir 'release\bundle\nsis') -Filter '*-setup.exe' |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
