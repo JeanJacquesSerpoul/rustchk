@@ -17,6 +17,8 @@ Petite application de bureau écrite en Rust avec [Tauri 2](https://tauri.app) e
 - **Préremplissage** : si un `fichier.sha256` (ou `.md5`, `.sha1`, `.sha512`…) ou un `SHA256SUMS` se trouve à côté
   du téléchargement, son empreinte est reprise automatiquement.
 - **Authentification OpenPGP** de ce fichier de checksums (voir ci-dessous).
+- **Signature Authenticode** des exécutables et installeurs (Windows) : qui l'a signé, et s'il a été modifié depuis.
+- **Analyse antimalware en ligne** (sur option) : l'empreinte SHA-256 est recherchée sur MalwareBazaar et/ou VirusTotal.
 - **Intégration à l'explorateur Windows** : entrée « Vérifier le checksum » dans le menu contextuel de tous les fichiers.
 - **Glisser-déposer**, ou ouverture depuis la ligne de commande / le menu contextuel.
 - **Mémorise la taille de la fenêtre** (et l'état agrandi) d'un lancement à l'autre.
@@ -42,6 +44,41 @@ obtenez la clé sur le site officiel de l'éditeur et comparez son empreinte ava
 
 Limites : pas de toile de confiance ni de serveur de clés ; une clé expirée n'est signalée (avertissement) que si
 elle avait déjà expiré à la date de signature.
+
+## Signature de l'éditeur (Authenticode, Windows)
+
+Un checksum et une signature OpenPGP prouvent que vous avez bien le fichier publié par l'éditeur, pas qu'il est
+inoffensif. Pour les exécutables, installeurs et scripts (`.exe`, `.msi`, `.dll`, `.ps1`…), RustChk demande aussi
+à Windows (`WinVerifyTrust`, comme l'explorateur) de vérifier la signature Authenticode intégrée :
+
+- **signé par …** : signature valide d'une autorité reconnue par Windows, avec le signataire et l'émetteur du
+  certificat. Vérifiez que c'est bien l'éditeur attendu ;
+- **non signé** : rien n'atteste qui a publié le programme ;
+- **refusée** : fichier modifié après signature, certificat révoqué, expiré sans horodatage, ou non délivré par une
+  autorité de confiance.
+
+La révocation des certificats est vérifiée : Windows peut donc contacter l'autorité de certification ; hors ligne,
+c'est signalé. Limite : seules les signatures intégrées au fichier sont lues, si bien que les fichiers système
+Windows signés par catalogue apparaissent non signés. La carte est masquée pour les autres types de fichiers et
+sous macOS/Linux.
+
+## Analyse antimalware en ligne (MalwareBazaar, VirusTotal)
+
+Désactivée par défaut. Dans la section « Analyse en ligne », cochez la case et renseignez la clé d'au moins un
+service :
+
+- [MalwareBazaar](https://bazaar.abuse.ch) (abuse.ch) : base d'échantillons de malwares, très fournie en
+  infostealers (Lumma, RedLine, Vidar…). Auth-Key gratuite sur [auth.abuse.ch](https://auth.abuse.ch).
+- [VirusTotal](https://www.virustotal.com) : résultat de la dernière analyse par environ 70 antivirus. Clé
+  personnelle gratuite dans votre compte (4 requêtes/minute, usage non commercial). Le fichier est jugé malveillant
+  à partir de 3 détections ; en dessous c'est un avertissement, une détection isolée étant souvent un faux positif.
+
+Une fois activée, l'**empreinte SHA-256 de chaque fichier vérifié** est envoyée à ces services, jamais le fichier
+ni son nom. Un fichier que les services n'ont jamais vu est signalé *inconnu*, ce qui ne veut pas dire sain.
+Les clés sont enregistrées dans `%APPDATA%\app.rustchk\reputation.json`, chiffrées avec la protection de données
+de Windows (DPAPI) : seul votre compte Windows sur cette machine peut les déchiffrer ; une copie du fichier est
+inutilisable ailleurs, et les clés sont alors à ressaisir. Des clés enregistrées en clair par une version
+précédente sont chiffrées au lancement suivant. Sous macOS et Linux, elles restent en clair.
 
 ## Intégration à l'explorateur (Windows)
 
@@ -109,7 +146,7 @@ se compile et fonctionne sans elle. Les paquets ne sont pas signés.
 | Chemin | Contenu |
 | --- | --- |
 | `core/` | Types et analyse des checksums partagés entre l'interface et le backend (Rust pur) |
-| `src-tauri/` | Hachage, recherche du checksum voisin, OpenPGP, intégration explorateur, commandes Tauri |
+| `src-tauri/` | Hachage, recherche du checksum voisin, OpenPGP, Authenticode, analyse en ligne, intégration explorateur, commandes Tauri |
 | `src/` | Interface Leptos et traductions |
 | `src-tauri/tests/fixtures/` | Clés publiques jetables et signatures générées avec GnuPG (aucune clé privée) |
 

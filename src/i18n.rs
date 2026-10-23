@@ -3,7 +3,9 @@
 //! Chaque message est une méthode de [`T`] dont le `match` couvre toutes les langues : en ajouter une
 //! (`Lang::De`…) fait échouer la compilation tant qu'un texte manque.
 
-use rustchk_core::{Algo, AppError, InvalidReason, KeyInfo, Lang};
+use rustchk_core::{
+    Algo, AppError, CodeSignatureProblem, InvalidReason, KeyInfo, Lang, Lookup, LookupError, Service, Threat,
+};
 
 #[derive(Clone, Copy)]
 pub struct T(pub Lang);
@@ -201,6 +203,183 @@ impl T {
         }
     }
 
+    // --- Signature Authenticode ---
+
+    pub fn code_title(self) -> &'static str {
+        self.pick("Signature de l'éditeur (Authenticode)", "Publisher signature (Authenticode)")
+    }
+    pub fn code_unsigned(self) -> &'static str {
+        self.pick(
+            "Ce programme n'est pas signé : rien n'atteste qui l'a publié. Méfiez-vous d'un installeur non signé venant d'un éditeur connu.",
+            "This program is not signed: nothing proves who published it. Be wary of an unsigned installer from a well-known vendor.",
+        )
+    }
+    pub fn code_valid(self, signer: &str) -> String {
+        self.pick(
+            format!("✓ Signé par {signer} — signature valide, reconnue par Windows."),
+            format!("✓ Signed by {signer} — valid signature, trusted by Windows."),
+        )
+    }
+    pub fn code_issuer(self, issuer: &str) -> String {
+        self.pick(format!("Certificat délivré par {issuer}."), format!("Certificate issued by {issuer}."))
+    }
+    pub fn code_revocation_unchecked(self) -> &'static str {
+        self.pick(
+            "La révocation du certificat n'a pas pu être vérifiée (pas d'accès réseau ?).",
+            "The certificate's revocation status could not be checked (no network access?).",
+        )
+    }
+    pub fn code_compare_hint(self) -> &'static str {
+        self.pick(
+            "Vérifiez que ce nom est bien celui de l'éditeur attendu : une signature valide prouve l'origine, pas l'innocuité.",
+            "Check that this is the publisher you expect: a valid signature proves the origin, not that the file is harmless.",
+        )
+    }
+    pub fn code_rejected(self, signer: Option<&str>, problem: &CodeSignatureProblem) -> String {
+        let reason = self.code_problem(problem);
+        match signer {
+            Some(signer) => self.pick(
+                format!("✗ Signature au nom de {signer} refusée : {reason} N'exécutez pas ce fichier."),
+                format!("✗ Signature in the name of {signer} rejected: {reason} Do not run this file."),
+            ),
+            None => self.pick(
+                format!("✗ Signature refusée : {reason} N'exécutez pas ce fichier."),
+                format!("✗ Signature rejected: {reason} Do not run this file."),
+            ),
+        }
+    }
+    fn code_problem(self, problem: &CodeSignatureProblem) -> String {
+        match problem {
+            CodeSignatureProblem::Tampered => self.pick(
+                "le fichier a été modifié après avoir été signé.".into(),
+                "the file was modified after it was signed.".into(),
+            ),
+            CodeSignatureProblem::Revoked => self.pick(
+                "le certificat a été révoqué par son autorité (souvent après un vol).".into(),
+                "the certificate was revoked by its authority (often after being stolen).".into(),
+            ),
+            CodeSignatureProblem::Expired => self.pick(
+                "le certificat a expiré et la signature n'est pas horodatée.".into(),
+                "the certificate has expired and the signature is not timestamped.".into(),
+            ),
+            CodeSignatureProblem::UntrustedRoot => self.pick(
+                "le certificat ne provient pas d'une autorité reconnue par Windows (auto-signé ?).".into(),
+                "the certificate does not come from an authority trusted by Windows (self-signed?).".into(),
+            ),
+            CodeSignatureProblem::Distrusted => self.pick(
+                "le certificat est explicitement marqué comme non fiable.".into(),
+                "the certificate is explicitly marked as untrusted.".into(),
+            ),
+            CodeSignatureProblem::Malformed => {
+                self.pick("la signature est malformée.".into(), "the signature is malformed.".into())
+            }
+            CodeSignatureProblem::Other { code } => {
+                self.pick(format!("erreur Windows {code}."), format!("Windows error {code}."))
+            }
+        }
+    }
+
+    // --- Analyse en ligne ---
+
+    pub fn reputation_title(self) -> &'static str {
+        self.pick("Analyse antimalware en ligne", "Online malware check")
+    }
+    pub fn reputation_checking(self) -> &'static str {
+        self.pick("Recherche de l'empreinte SHA-256…", "Looking up the SHA-256 checksum…")
+    }
+    pub fn reputation_privacy(self) -> &'static str {
+        self.pick(
+            "Seule l'empreinte SHA-256 a été envoyée, jamais le fichier. Un fichier inconnu n'est pas pour autant sain.",
+            "Only the SHA-256 checksum was sent, never the file. An unknown file is not necessarily safe.",
+        )
+    }
+    pub fn lookup(self, service: Service, lookup: &Lookup) -> String {
+        let s = service.label();
+        match lookup {
+            Lookup::Unknown => self.pick(
+                format!("{s} : empreinte inconnue, aucun signalement."),
+                format!("{s}: unknown checksum, never reported."),
+            ),
+            Lookup::Listed { family, tags } => {
+                let family = family.as_deref().map(|f| format!(" ({f})")).unwrap_or_default();
+                let tags = if tags.is_empty() { String::new() } else { format!(" [{}]", tags.join(", ")) };
+                self.pick(
+                    format!("✗ {s} : malware répertorié{family}{tags}. N'ouvrez pas ce fichier."),
+                    format!("✗ {s}: known malware{family}{tags}. Do not open this file."),
+                )
+            }
+            Lookup::Scanned { malicious, suspicious, engines, label } => {
+                let label = label.as_deref().map(|l| format!(" ({l})")).unwrap_or_default();
+                match lookup.threat() {
+                    Threat::Malicious => self.pick(
+                        format!("✗ {s} : détecté par {malicious} antivirus sur {engines}{label}. N'ouvrez pas ce fichier."),
+                        format!("✗ {s}: flagged by {malicious} of {engines} antivirus engines{label}. Do not open this file."),
+                    ),
+                    Threat::Suspicious => self.pick(
+                        format!("{s} : {malicious} détection(s) et {suspicious} alerte(s) sur {engines} antivirus{label} — peut-être un faux positif, restez prudent."),
+                        format!("{s}: {malicious} detection(s) and {suspicious} warning(s) from {engines} engines{label} — possibly a false positive, be careful."),
+                    ),
+                    _ => self.pick(
+                        format!("✓ {s} : aucun des {engines} antivirus ne détecte ce fichier."),
+                        format!("✓ {s}: none of the {engines} antivirus engines flag this file."),
+                    ),
+                }
+            }
+            Lookup::Failed { error } => {
+                let reason = match error {
+                    LookupError::InvalidKey => self.pick("clé d'API refusée.".into(), "API key rejected.".into()),
+                    LookupError::RateLimited => self.pick(
+                        "quota de requêtes dépassé, réessayez plus tard.".into(),
+                        "request quota exceeded, try again later.".into(),
+                    ),
+                    LookupError::Network { detail } => self
+                        .pick(format!("service injoignable ({detail})."), format!("service unreachable ({detail}).")),
+                    LookupError::Unexpected { detail } => {
+                        self.pick(format!("réponse inattendue ({detail})."), format!("unexpected response ({detail})."))
+                    }
+                };
+                self.pick(format!("{s} : vérification impossible — {reason}"), format!("{s}: check failed — {reason}"))
+            }
+        }
+    }
+    pub fn reputation_settings_title(self) -> &'static str {
+        self.pick("Analyse en ligne (MalwareBazaar, VirusTotal)", "Online check (MalwareBazaar, VirusTotal)")
+    }
+    pub fn reputation_help(self) -> &'static str {
+        self.pick(
+            "Désactivée par défaut. Une fois activée, l'empreinte SHA-256 de chaque fichier vérifié — et rien d'autre — est envoyée aux services dont la clé est renseignée. Clés gratuites : auth.abuse.ch (MalwareBazaar) et virustotal.com (compte, puis « API key »).",
+            "Off by default. Once enabled, the SHA-256 checksum of every file you verify — and nothing else — is sent to the services whose key is filled in. Free keys: auth.abuse.ch (MalwareBazaar) and virustotal.com (account, then \"API key\").",
+        )
+    }
+    pub fn reputation_enable(self) -> &'static str {
+        self.pick(
+            "Rechercher l'empreinte des fichiers vérifiés sur ces services",
+            "Look up the checksum of verified files on these services",
+        )
+    }
+    pub fn api_key_label(self, service: Service) -> String {
+        let s = service.label();
+        self.pick(format!("Clé d'API {s}"), format!("{s} API key"))
+    }
+    pub fn api_key_placeholder(self, service: Service) -> &'static str {
+        match service {
+            Service::MalwareBazaar => self.pick("Auth-Key abuse.ch", "abuse.ch Auth-Key"),
+            Service::VirusTotal => self.pick("Clé personnelle VirusTotal", "Personal VirusTotal key"),
+        }
+    }
+    pub fn reputation_keys_storage(self) -> &'static str {
+        self.pick(
+            "Les clés sont enregistrées chiffrées pour votre compte Windows (DPAPI), dans reputation.json à côté du trousseau.",
+            "Keys are stored encrypted for your Windows account (DPAPI), in reputation.json next to the keyring.",
+        )
+    }
+    pub fn save(self) -> &'static str {
+        self.pick("Enregistrer", "Save")
+    }
+    pub fn settings_saved(self) -> &'static str {
+        self.pick("Réglages enregistrés.", "Settings saved.")
+    }
+
     // --- Trousseau ---
 
     pub fn keyring_title(self, count: usize) -> String {
@@ -293,6 +472,13 @@ impl T {
                 format!("Could not export the key ({detail})."),
             ),
             AppError::InvalidFingerprint => self.pick("Empreinte invalide.".into(), "Invalid fingerprint.".into()),
+            AppError::InvalidHash => {
+                self.pick("Empreinte SHA-256 invalide.".into(), "Invalid SHA-256 checksum.".into())
+            }
+            AppError::SettingsWrite { detail } => self.pick(
+                format!("Enregistrement des réglages impossible : {detail}"),
+                format!("Could not save the settings: {detail}"),
+            ),
             AppError::ShellUnsupported => self.pick(
                 "L'intégration à l'explorateur n'est disponible que sous Windows.".into(),
                 "File explorer integration is only available on Windows.".into(),
@@ -382,6 +568,36 @@ mod tests {
         let revoked = InvalidReason::KeyRevoked { key_id: "ABCD".into() };
         assert!(T(Lang::En).sig_rejected(&revoked).contains("key ABCD has been revoked"));
         assert!(T(Lang::Fr).sig_rejected(&revoked).contains("la clé ABCD a été révoquée"));
+    }
+
+    #[test]
+    fn lookup_messages_follow_the_threat_level() {
+        let en = T(Lang::En);
+        let scanned = |malicious| Lookup::Scanned { malicious, suspicious: 0, engines: 70, label: None };
+        assert_eq!(
+            en.lookup(Service::VirusTotal, &scanned(0)),
+            "✓ VirusTotal: none of the 70 antivirus engines flag this file."
+        );
+        assert!(en.lookup(Service::VirusTotal, &scanned(1)).contains("possibly a false positive"));
+        assert!(en.lookup(Service::VirusTotal, &scanned(40)).starts_with("✗ VirusTotal: flagged by 40 of 70"));
+        let listed = Lookup::Listed { family: Some("RedLineStealer".into()), tags: vec!["exe".into()] };
+        assert_eq!(
+            T(Lang::Fr).lookup(Service::MalwareBazaar, &listed),
+            "✗ MalwareBazaar : malware répertorié (RedLineStealer) [exe]. N'ouvrez pas ce fichier."
+        );
+        let failed = Lookup::Failed { error: LookupError::InvalidKey };
+        assert_eq!(en.lookup(Service::MalwareBazaar, &failed), "MalwareBazaar: check failed — API key rejected.");
+    }
+
+    #[test]
+    fn code_signature_messages() {
+        let en = T(Lang::En);
+        assert_eq!(
+            en.code_valid("Mozilla Corporation"),
+            "✓ Signed by Mozilla Corporation — valid signature, trusted by Windows."
+        );
+        assert!(en.code_rejected(Some("ACME"), &CodeSignatureProblem::Tampered).contains("ACME"));
+        assert!(T(Lang::Fr).code_rejected(None, &CodeSignatureProblem::Revoked).contains("révoqué"));
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use rustchk_core::{
-    matches, parse_expected, Algo, AppError, Expected, FileReport, KeyInfo, Lang, ParseError, Progress, Sidecar,
-    SignatureStatus,
+    matches, parse_expected, Algo, AppError, CodeSignature, Expected, FileReport, KeyInfo, Lang, ParseError, Progress,
+    ReputationSettings, Service, ServiceReport, Sidecar, SignatureStatus, Threat,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +23,16 @@ struct FingerprintArgs {
 struct ShellArgs {
     enabled: bool,
     lang: Lang,
+}
+
+#[derive(Serialize)]
+struct Sha256Args {
+    sha256: String,
+}
+
+#[derive(Serialize)]
+struct SettingsArgs {
+    settings: ReputationSettings,
 }
 
 #[derive(Serialize)]
@@ -67,6 +77,32 @@ enum KeyMsg {
     Failed(AppError),
 }
 
+/// Analyse en ligne du fichier courant.
+#[derive(Clone)]
+enum Reputation {
+    /// Désactivée, sans clé, ou empreintes pas encore calculées.
+    Off,
+    Checking,
+    Done(Vec<ServiceReport>),
+    Failed(AppError),
+}
+
+#[derive(Clone)]
+enum SettingsMsg {
+    Saved,
+    Failed(AppError),
+}
+
+/// Classe du bandeau pour une réponse de service.
+fn threat_class(threat: Threat) -> &'static str {
+    match threat {
+        Threat::Malicious => "banner ko",
+        Threat::Suspicious | Threat::Error => "banner warn",
+        Threat::Clean => "banner ok",
+        Threat::Unknown => "banner wait",
+    }
+}
+
 #[derive(Clone)]
 enum ShellMsg {
     Added,
@@ -101,6 +137,12 @@ pub fn App() -> impl IntoView {
     let signature = RwSignal::new(None::<SignatureStatus>);
     let keys = RwSignal::new(Vec::<KeyInfo>::new());
     let key_msg = RwSignal::new(None::<KeyMsg>);
+    let code_signature = RwSignal::new(None::<CodeSignature>);
+    let reputation = RwSignal::new(Reputation::Off);
+    // Réglages enregistrés, et brouillon édité dans le panneau jusqu'à « Enregistrer ».
+    let settings = RwSignal::new(ReputationSettings::default());
+    let draft = RwSignal::new(ReputationSettings::default());
+    let settings_msg = RwSignal::new(None::<SettingsMsg>);
 
     let expected = Memo::new(move |_| expected_text.with(|t| parse_expected(t)));
     let verdict = Memo::new(move |_| report.with(|r| verdict_for(r.as_ref(), &expected.get())));
@@ -186,16 +228,65 @@ pub fn App() -> impl IntoView {
         });
     };
 
+    // Envoie l'empreinte SHA-256 aux services activés ; ignore la réponse si le fichier a changé.
+    let check_reputation = move |sha256: String| {
+        if settings.get_untracked().services().is_empty() {
+            reputation.set(Reputation::Off);
+            return;
+        }
+        reputation.set(Reputation::Checking);
+        spawn_local(async move {
+            let result: Result<Vec<ServiceReport>, AppError> =
+                tauri::invoke("check_reputation", &Sha256Args { sha256: sha256.clone() }).await;
+            if report.get_untracked().is_some_and(|r| r.hashes.sha256 == sha256) {
+                reputation.set(match result {
+                    Ok(list) if list.is_empty() => Reputation::Off,
+                    Ok(list) => Reputation::Done(list),
+                    Err(e) => Reputation::Failed(e),
+                });
+            }
+        });
+    };
+
+    let save_settings = move |_| {
+        let new = draft.get_untracked();
+        spawn_local(async move {
+            match tauri::invoke::<_, ()>("set_reputation_settings", &SettingsArgs { settings: new.clone() }).await {
+                Ok(()) => {
+                    settings.set(new);
+                    settings_msg.set(Some(SettingsMsg::Saved));
+                    if let Some(r) = report.get_untracked() {
+                        check_reputation(r.hashes.sha256);
+                    }
+                }
+                Err(e) => settings_msg.set(Some(SettingsMsg::Failed(e))),
+            }
+        });
+    };
+
     let load = move |path: String| {
         file.set(Some(path.clone()));
         report.set(None);
         error.set(None);
         sidecar.set(None);
         signature.set(None);
+        code_signature.set(None);
+        reputation.set(Reputation::Off);
         expected_text.set(String::new());
         progress.set(Some(Progress { done: 0, total: 0 }));
 
         let still_current = move |p: &str| file.get_untracked().as_deref() == Some(p);
+
+        let signed_path = path.clone();
+        spawn_local(async move {
+            let status: Result<CodeSignature, AppError> =
+                tauri::invoke("check_code_signature", &PathArgs { path: signed_path.clone() }).await;
+            if let Ok(status) = status {
+                if still_current(&signed_path) {
+                    code_signature.set(Some(status));
+                }
+            }
+        });
 
         let sidecar_path = path.clone();
         spawn_local(async move {
@@ -219,7 +310,11 @@ pub fn App() -> impl IntoView {
             }
             progress.set(None);
             match result {
-                Ok(r) => report.set(Some(r)),
+                Ok(r) => {
+                    let sha256 = r.hashes.sha256.clone();
+                    report.set(Some(r));
+                    check_reputation(sha256);
+                }
                 Err(AppError::Cancelled) => {}
                 Err(e) => error.set(Some(e)),
             }
@@ -275,6 +370,10 @@ pub fn App() -> impl IntoView {
         .await;
 
         refresh_keys();
+        if let Ok(saved) = tauri::invoke::<_, ReputationSettings>("get_reputation_settings", &NoArgs {}).await {
+            draft.set(saved.clone());
+            settings.set(saved);
+        }
         if let Ok(on) = tauri::invoke::<_, bool>("shell_status", &NoArgs {}).await {
             shell_on.set(on);
         }
@@ -438,6 +537,57 @@ pub fn App() -> impl IntoView {
                     }
                 })}
 
+                {move || code_signature.get().filter(|s| *s != CodeSignature::NotApplicable).map(|status| {
+                    let body = match status {
+                        CodeSignature::NotApplicable => ().into_any(),
+                        CodeSignature::Unsigned => {
+                            view! { <p class="banner warn">{t().code_unsigned()}</p> }.into_any()
+                        }
+                        CodeSignature::Valid { signer, issuer, revocation_checked } => view! {
+                            <p class="banner ok">{t().code_valid(&signer)}</p>
+                            {issuer.map(|i| view! { <p class="muted small">{t().code_issuer(&i)}</p> })}
+                            {(!revocation_checked).then(|| view! {
+                                <p class="muted small">{t().code_revocation_unchecked()}</p>
+                            })}
+                            <p class="muted small">{t().code_compare_hint()}</p>
+                        }.into_any(),
+                        CodeSignature::Rejected { signer, reason } => view! {
+                            <p class="banner ko">{t().code_rejected(signer.as_deref(), &reason)}</p>
+                        }.into_any(),
+                    };
+                    view! {
+                        <section class="card">
+                            <h2>{move || t().code_title()}</h2>
+                            {body}
+                        </section>
+                    }
+                })}
+
+                {move || {
+                    let body = match reputation.get() {
+                        Reputation::Off => return None,
+                        Reputation::Checking => {
+                            view! { <p class="banner wait">{t().reputation_checking()}</p> }.into_any()
+                        }
+                        Reputation::Failed(e) => view! { <p class="banner warn">{t().error(&e)}</p> }.into_any(),
+                        Reputation::Done(list) => list
+                            .into_iter()
+                            .map(|r| {
+                                let class = threat_class(r.lookup.threat());
+                                view! { <p class=class>{t().lookup(r.service, &r.lookup)}</p> }
+                            })
+                            .collect_view()
+                            .into_any(),
+                    };
+                    Some(view! {
+                        <section class="card">
+                            <h2>{move || t().reputation_title()}</h2>
+                            {body}
+                            <p class="muted small">{move || t().reputation_privacy()}</p>
+                        </section>
+                    })
+                }}
+
                 {move || report.get().map(|r| {
                     let compared = expected.get().ok().map(|e| e.algo);
                     let rows = Algo::ALL
@@ -500,6 +650,52 @@ pub fn App() -> impl IntoView {
                 {move || key_msg.get().map(|m| match m {
                     KeyMsg::Imported(list) => view! { <p class="muted small">{t().keys_imported(&list)}</p> }.into_any(),
                     KeyMsg::Failed(e) => view! { <p class="banner ko">{t().error(&e)}</p> }.into_any(),
+                })}
+            </details>
+
+            <details class="card keyring">
+                <summary>{move || t().reputation_settings_title()}</summary>
+                <p class="muted small">{move || t().reputation_help()}</p>
+                <label class="switch settings-row">
+                    <input
+                        type="checkbox"
+                        prop:checked=move || draft.with(|d| d.enabled)
+                        on:change=move |ev| draft.update(|d| d.enabled = event_target_checked(&ev))
+                    />
+                    <span>{move || t().reputation_enable()}</span>
+                </label>
+                {Service::ALL
+                    .into_iter()
+                    .map(|service| {
+                        let id = format!("key-{}", service.label().to_ascii_lowercase());
+                        view! {
+                            <label class="field-label settings-row" for=id.clone()>
+                                {move || t().api_key_label(service)}
+                            </label>
+                            <input
+                                id=id
+                                class="key-input"
+                                type="password"
+                                autocomplete="off"
+                                spellcheck="false"
+                                placeholder=move || t().api_key_placeholder(service)
+                                prop:value=move || draft.with(|d| d.key(service).to_string())
+                                on:input=move |ev| {
+                                    let value = event_target_value(&ev);
+                                    draft.update(|d| match service {
+                                        Service::MalwareBazaar => d.malwarebazaar_key = value,
+                                        Service::VirusTotal => d.virustotal_key = value,
+                                    });
+                                }
+                            />
+                        }
+                    })
+                    .collect_view()}
+                <p class="muted small">{move || t().reputation_keys_storage()}</p>
+                <p class="actions"><button on:click=save_settings>{move || t().save()}</button></p>
+                {move || settings_msg.get().map(|m| match m {
+                    SettingsMsg::Saved => view! { <p class="muted small">{t().settings_saved()}</p> }.into_any(),
+                    SettingsMsg::Failed(e) => view! { <p class="banner ko">{t().error(&e)}</p> }.into_any(),
                 })}
             </details>
 

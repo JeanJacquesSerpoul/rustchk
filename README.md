@@ -17,6 +17,9 @@ A small desktop app written in Rust with [Tauri 2](https://tauri.app) and [Lepto
 - **Checksum auto-fill**: if a `file.sha256` (or `.md5`, `.sha1`, `.sha512`…) or a `SHA256SUMS` sits next to the
   download, its checksum is picked up automatically.
 - **OpenPGP authentication** of that checksum file (see below).
+- **Authenticode signature** of executables and installers (Windows): who signed it, and whether the file was
+  modified since.
+- **Online malware check** (opt-in): the SHA-256 is looked up on MalwareBazaar and/or VirusTotal.
 - **Windows Explorer integration**: a "Verify checksum" entry in the context menu of every file.
 - **Drag and drop**, or open from the command line / context menu.
 - **Remembers the window size** (and maximized state) between launches.
@@ -42,6 +45,39 @@ official website and compare its fingerprint before importing it.
 
 Limitations: no web of trust and no keyserver lookup; a key that has expired is only flagged (as a warning) when
 it had already expired at signing time.
+
+## Publisher signature (Authenticode, Windows)
+
+A checksum and an OpenPGP signature prove that you got the file the vendor published, not that it is harmless.
+For executables, installers and scripts (`.exe`, `.msi`, `.dll`, `.ps1`…), RustChk also asks Windows
+(`WinVerifyTrust`, as Explorer does) to verify the embedded Authenticode signature:
+
+- **signed by …**: valid signature from an authority trusted by Windows, with the signer and certificate issuer.
+  Check that it is the publisher you expect;
+- **unsigned**: nothing proves who published the program;
+- **rejected**: file modified after signing, certificate revoked, expired without a timestamp, or not issued by a
+  trusted authority.
+
+Certificate revocation is checked, so Windows may contact the certificate authority; offline, this is flagged.
+Limitation: only signatures embedded in the file are read, so Windows system files signed through a catalog show
+up as unsigned. The card is hidden for other file types and on macOS/Linux.
+
+## Online malware check (MalwareBazaar, VirusTotal)
+
+Off by default. In the "Online check" section, tick the box and fill in the key of at least one service:
+
+- [MalwareBazaar](https://bazaar.abuse.ch) (abuse.ch): database of malware samples, strong on infostealers
+  (Lumma, RedLine, Vidar…). Free Auth-Key at [auth.abuse.ch](https://auth.abuse.ch).
+- [VirusTotal](https://www.virustotal.com): result of the last scan by about 70 antivirus engines. Free personal
+  key in your account (4 requests/minute, non-commercial use). The file is flagged as malicious from 3 detections
+  onwards; below that it is a warning, since an isolated detection is often a false positive.
+
+Once enabled, the **SHA-256 of every file you verify** is sent to these services, never the file or its name.
+A file the services have never seen is reported as *unknown*, which does not mean it is safe.
+The keys are stored in `%APPDATA%\app.rustchk\reputation.json`, encrypted with the Windows data protection API
+(DPAPI): only your Windows account on this machine can decrypt them, so a copy of the file is useless elsewhere and
+the keys must then be entered again. Keys saved in plain text by an earlier version are encrypted at the next
+launch. On macOS and Linux they remain in plain text.
 
 ## Explorer integration (Windows)
 
@@ -109,7 +145,7 @@ Packages are unsigned.
 | Path | Contents |
 | --- | --- |
 | `core/` | Types and checksum parsing shared by the UI and the backend (pure Rust) |
-| `src-tauri/` | Hashing, neighbouring checksum lookup, OpenPGP, Explorer integration, Tauri commands |
+| `src-tauri/` | Hashing, neighbouring checksum lookup, OpenPGP, Authenticode, online check, Explorer integration, Tauri commands |
 | `src/` | Leptos user interface and translations |
 | `src-tauri/tests/fixtures/` | Throw-away public keys and signatures generated with GnuPG (no private keys) |
 
