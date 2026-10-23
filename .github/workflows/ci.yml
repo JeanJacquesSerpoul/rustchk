@@ -35,15 +35,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # key_storage : protection des clés d'API attendue par les tests (voir src-tauri/src/secret.rs).
           - name: Linux
             os: ubuntu-22.04
             artifact: release/*
+            key_storage: SecretService
           - name: macOS
             os: macos-latest
             artifact: target/release/bundle/macos/*.app
+            key_storage: Keychain
           - name: Windows
             os: windows-latest
             artifact: release/*
+            key_storage: Dpapi
     steps:
       - uses: actions/checkout@v7
 
@@ -52,7 +56,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libssl-dev librsvg2-dev patchelf
+            libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libssl-dev librsvg2-dev patchelf gnome-keyring
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -75,8 +79,23 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Les tests échouent si les clés d'API ne passent pas par la protection attendue (repli en clair).
       - name: Tests
+        if: runner.os != 'Linux'
+        env:
+          RUSTCHK_EXPECT_KEY_STORAGE: ${{ matrix.key_storage }}
         run: cargo test --workspace
+
+      # Dans une session D-Bus avec gnome-keyring déverrouillé : les clés d'API passent par le vrai trousseau
+      # Secret Service, et non par le repli en clair d'une machine sans session graphique.
+      - name: Tests (Linux, trousseau Secret Service)
+        if: runner.os == 'Linux'
+        env:
+          RUSTCHK_EXPECT_KEY_STORAGE: ${{ matrix.key_storage }}
+        run: |
+          dbus-run-session -- bash -c '
+            echo -n ci | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            cargo test --workspace'
 
       # Linux et Windows passent par les scripts de `scripts/` : ils sont ainsi testés à chaque changement.
       - name: Empaqueter l'AppImage (Linux)

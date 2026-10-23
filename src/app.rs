@@ -1,8 +1,8 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use rustchk_core::{
-    matches, parse_expected, Algo, AppError, CodeSignature, Expected, FileReport, KeyInfo, Lang, ParseError, Progress,
-    ReputationSettings, Service, ServiceReport, Sidecar, SignatureStatus, Threat,
+    matches, parse_expected, Algo, AppError, CodeSignature, Expected, FileReport, KeyInfo, KeyStorage, Lang,
+    ParseError, Progress, ReputationSettings, Service, ServiceReport, Sidecar, SignatureStatus, Threat,
 };
 use serde::{Deserialize, Serialize};
 
@@ -143,6 +143,7 @@ pub fn App() -> impl IntoView {
     let settings = RwSignal::new(ReputationSettings::default());
     let draft = RwSignal::new(ReputationSettings::default());
     let settings_msg = RwSignal::new(None::<SettingsMsg>);
+    let key_storage = RwSignal::new(None::<KeyStorage>);
 
     let expected = Memo::new(move |_| expected_text.with(|t| parse_expected(t)));
     let verdict = Memo::new(move |_| report.with(|r| verdict_for(r.as_ref(), &expected.get())));
@@ -373,6 +374,9 @@ pub fn App() -> impl IntoView {
         if let Ok(saved) = tauri::invoke::<_, ReputationSettings>("get_reputation_settings", &NoArgs {}).await {
             draft.set(saved.clone());
             settings.set(saved);
+        }
+        if let Ok(storage) = tauri::invoke::<_, KeyStorage>("key_storage", &NoArgs {}).await {
+            key_storage.set(Some(storage));
         }
         if let Ok(on) = tauri::invoke::<_, bool>("shell_status", &NoArgs {}).await {
             shell_on.set(on);
@@ -691,7 +695,7 @@ pub fn App() -> impl IntoView {
                         }
                     })
                     .collect_view()}
-                <p class="muted small">{move || t().reputation_keys_storage()}</p>
+                {move || key_storage.get().map(|s| view! { <p class="muted small">{t().reputation_keys_storage(s)}</p> })}
                 <p class="actions"><button on:click=save_settings>{move || t().save()}</button></p>
                 {move || settings_msg.get().map(|m| match m {
                     SettingsMsg::Saved => view! { <p class="muted small">{t().settings_saved()}</p> }.into_any(),

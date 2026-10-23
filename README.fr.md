@@ -75,10 +75,19 @@ service :
 
 Une fois activée, l'**empreinte SHA-256 de chaque fichier vérifié** est envoyée à ces services, jamais le fichier
 ni son nom. Un fichier que les services n'ont jamais vu est signalé *inconnu*, ce qui ne veut pas dire sain.
-Les clés sont enregistrées dans `%APPDATA%\app.rustchk\reputation.json`, chiffrées avec la protection de données
-de Windows (DPAPI) : seul votre compte Windows sur cette machine peut les déchiffrer ; une copie du fichier est
-inutilisable ailleurs, et les clés sont alors à ressaisir. Des clés enregistrées en clair par une version
-précédente sont chiffrées au lancement suivant. Sous macOS et Linux, elles restent en clair.
+Les clés sont protégées selon le système, et la section des réglages indique laquelle s'applique :
+
+- **Windows** : enregistrées dans `%APPDATA%\app.rustchk\reputation.json`, chiffrées avec la protection de données
+  de Windows (DPAPI). Seul votre compte Windows sur cette machine peut les déchiffrer ; une copie du fichier est
+  inutilisable ailleurs, et les clés sont alors à ressaisir.
+- **Linux** : rangées dans le trousseau de votre session via Secret Service (GNOME Keyring, KWallet…), chiffré et
+  déverrouillé à la connexion. Elles apparaissent sous « RustChk — MalwareBazaar API key » / « … VirusTotal API
+  key » dans des outils comme Seahorse, et `reputation.json` ne garde qu'un marqueur. Sans trousseau joignable
+  (pas de session D-Bus, gestionnaire de fenêtres minimal), elles sont enregistrées en clair.
+- **macOS** : rangées dans le trousseau de session (Keychain), sous « app.rustchk » dans Trousseaux d'accès.
+  L'application n'étant pas signée, macOS peut demander une fois d'en autoriser l'accès après une mise à jour.
+
+Des clés enregistrées en clair par une version précédente sont protégées au lancement suivant.
 
 ## Intégration à l'explorateur (Windows)
 
@@ -137,6 +146,10 @@ Les installeurs ne sont pas signés.
 | --- | --- |
 | **Format** | `cargo fmt --check` |
 | **Linux** (Ubuntu 22.04) · **macOS** · **Windows** | construit l'interface avec Trunk, `clippy -D warnings`, `cargo test --workspace`, puis empaquète l'application (AppImage / `.app` / installeur NSIS, les deux premiers via les scripts ci-dessus) et la publie en artefact conservé 7 jours |
+
+Les tests vérifient que les clés d'API passent par la vraie protection de chaque système (DPAPI, Keychain, Secret
+Service) et non par le repli en clair ; sous Linux, ils tournent dans une session D-Bus avec gnome-keyring
+déverrouillé.
 
 L'intégration au menu contextuel de l'explorateur n'existe que sous Windows ; sous Linux et macOS l'application
 se compile et fonctionne sans elle. Les paquets ne sont pas signés.

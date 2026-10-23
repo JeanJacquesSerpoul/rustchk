@@ -74,10 +74,19 @@ Off by default. In the "Online check" section, tick the box and fill in the key 
 
 Once enabled, the **SHA-256 of every file you verify** is sent to these services, never the file or its name.
 A file the services have never seen is reported as *unknown*, which does not mean it is safe.
-The keys are stored in `%APPDATA%\app.rustchk\reputation.json`, encrypted with the Windows data protection API
-(DPAPI): only your Windows account on this machine can decrypt them, so a copy of the file is useless elsewhere and
-the keys must then be entered again. Keys saved in plain text by an earlier version are encrypted at the next
-launch. On macOS and Linux they remain in plain text.
+The keys are protected according to the system, and the settings section says which applies:
+
+- **Windows**: stored in `%APPDATA%\app.rustchk\reputation.json`, encrypted with the Windows data protection API
+  (DPAPI). Only your Windows account on this machine can decrypt them, so a copy of the file is useless elsewhere and
+  the keys must then be entered again.
+- **Linux**: kept in your session keyring through Secret Service (GNOME Keyring, KWallet…), encrypted and unlocked
+  when you log in. They show up as "RustChk — MalwareBazaar API key" / "… VirusTotal API key" in tools such as
+  Seahorse, and `reputation.json` only keeps a marker. Without a reachable keyring (no D-Bus session, minimal window
+  manager), they are stored in plain text.
+- **macOS**: kept in your login keychain (Keychain), as "app.rustchk" items in Keychain Access. As the app is not
+  signed, macOS may ask once to allow access to them after an update.
+
+Keys saved in plain text by an earlier version are protected at the next launch.
 
 ## Explorer integration (Windows)
 
@@ -136,6 +145,9 @@ Installers are unsigned.
 | --- | --- |
 | **Format** | `cargo fmt --check` |
 | **Linux** (Ubuntu 22.04) · **macOS** · **Windows** | builds the UI with Trunk, `clippy -D warnings`, `cargo test --workspace`, then packages the app (AppImage / `.app` / NSIS installer, the first two through the scripts above) and uploads it as a 7-day artifact |
+
+The tests check that API keys go through each system's real protection (DPAPI, Keychain, Secret Service) rather
+than the plain-text fallback; on Linux they run in a D-Bus session with an unlocked gnome-keyring.
 
 The Explorer context-menu integration is Windows-only; on Linux and macOS the app builds and runs without it.
 Packages are unsigned.
