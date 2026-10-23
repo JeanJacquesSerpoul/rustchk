@@ -155,6 +155,155 @@ pub enum InvalidReason {
     },
 }
 
+/// Signature Authenticode d'un exécutable ou installeur Windows, vérifiée par le système.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CodeSignature {
+    /// Type de fichier qui ne porte pas de signature Authenticode, ou système autre que Windows.
+    NotApplicable,
+    Unsigned,
+    /// Signature valide, émise par une autorité reconnue par Windows.
+    Valid {
+        signer: String,
+        issuer: Option<String>,
+        /// Faux si la révocation du certificat n'a pas pu être vérifiée (hors ligne).
+        revocation_checked: bool,
+    },
+    Rejected {
+        signer: Option<String>,
+        reason: CodeSignatureProblem,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CodeSignatureProblem {
+    /// Le fichier a été modifié après sa signature.
+    Tampered,
+    Revoked,
+    /// Certificat expiré et signature sans horodatage.
+    Expired,
+    /// Chaîne de certificats qui ne remonte pas à une autorité de confiance (certificat auto-signé…).
+    UntrustedRoot,
+    /// Certificat explicitement marqué comme non fiable.
+    Distrusted,
+    Malformed,
+    /// Autre code d'erreur WinVerifyTrust (`0x800B…`).
+    Other {
+        code: String,
+    },
+}
+
+/// Service de réputation interrogé avec l'empreinte SHA-256 du fichier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Service {
+    MalwareBazaar,
+    VirusTotal,
+}
+
+impl Service {
+    pub const ALL: [Service; 2] = [Service::MalwareBazaar, Service::VirusTotal];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Service::MalwareBazaar => "MalwareBazaar",
+            Service::VirusTotal => "VirusTotal",
+        }
+    }
+}
+
+/// Réglages de l'analyse en ligne, désactivée par défaut. Les clés d'API restent sur la machine.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReputationSettings {
+    pub enabled: bool,
+    pub malwarebazaar_key: String,
+    pub virustotal_key: String,
+}
+
+impl ReputationSettings {
+    pub fn key(&self, service: Service) -> &str {
+        match service {
+            Service::MalwareBazaar => self.malwarebazaar_key.trim(),
+            Service::VirusTotal => self.virustotal_key.trim(),
+        }
+    }
+
+    /// Services à interroger : aucun si l'analyse est désactivée, sinon ceux dont la clé est renseignée.
+    pub fn services(&self) -> Vec<Service> {
+        if !self.enabled {
+            return Vec::new();
+        }
+        Service::ALL.into_iter().filter(|s| !self.key(*s).is_empty()).collect()
+    }
+}
+
+/// Réponse d'un service de réputation pour une empreinte.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Lookup {
+    /// Empreinte inconnue du service : ni bon ni mauvais signe.
+    Unknown,
+    /// MalwareBazaar : échantillon de malware répertorié.
+    Listed {
+        family: Option<String>,
+        tags: Vec<String>,
+    },
+    /// VirusTotal : dernière analyse du fichier par les antivirus.
+    Scanned {
+        malicious: u32,
+        suspicious: u32,
+        engines: u32,
+        label: Option<String>,
+    },
+    Failed {
+        error: LookupError,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LookupError {
+    InvalidKey,
+    RateLimited,
+    Network { detail: String },
+    Unexpected { detail: String },
+}
+
+/// Nombre de moteurs VirusTotal à partir duquel le fichier est jugé malveillant : en dessous, une
+/// détection isolée est souvent un faux positif.
+pub const MALICIOUS_THRESHOLD: u32 = 3;
+
+/// Gravité d'une réponse, pour choisir sa présentation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Threat {
+    Malicious,
+    Suspicious,
+    Clean,
+    Unknown,
+    Error,
+}
+
+impl Lookup {
+    pub fn threat(&self) -> Threat {
+        match self {
+            Lookup::Listed { .. } => Threat::Malicious,
+            Lookup::Scanned { malicious, .. } if *malicious >= MALICIOUS_THRESHOLD => Threat::Malicious,
+            Lookup::Scanned { malicious, suspicious, .. } if *malicious > 0 || *suspicious > 0 => Threat::Suspicious,
+            Lookup::Scanned { .. } => Threat::Clean,
+            Lookup::Unknown => Threat::Unknown,
+            Lookup::Failed { .. } => Threat::Error,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceReport {
+    pub service: Service,
+    pub lookup: Lookup,
+}
+
+/// Vrai pour une empreinte SHA-256 en hexadécimal (seule donnée envoyée aux services en ligne).
+pub fn is_sha256(hash: &str) -> bool {
+    hash.len() == Algo::Sha256.hex_len() && hash.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 /// Langue de l'interface.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -219,6 +368,10 @@ pub enum AppError {
         detail: String,
     },
     InvalidFingerprint,
+    InvalidHash,
+    SettingsWrite {
+        detail: String,
+    },
     ShellUnsupported,
     Internal {
         detail: String,
@@ -431,6 +584,36 @@ mod tests {
         for lang in Lang::ALL {
             assert_eq!(Lang::from_tag(lang.tag()), Some(lang));
         }
+    }
+
+    #[test]
+    fn reputation_services_require_opt_in_and_key() {
+        let mut settings = ReputationSettings { virustotal_key: " vt ".into(), ..Default::default() };
+        assert!(settings.services().is_empty());
+        settings.enabled = true;
+        assert_eq!(settings.services(), vec![Service::VirusTotal]);
+        assert_eq!(settings.key(Service::VirusTotal), "vt");
+        settings.malwarebazaar_key = "mb".into();
+        assert_eq!(settings.services(), Service::ALL.to_vec());
+    }
+
+    #[test]
+    fn lookup_threat_levels() {
+        let scanned = |malicious, suspicious| Lookup::Scanned { malicious, suspicious, engines: 70, label: None };
+        assert_eq!(scanned(0, 0).threat(), Threat::Clean);
+        assert_eq!(scanned(0, 1).threat(), Threat::Suspicious);
+        assert_eq!(scanned(MALICIOUS_THRESHOLD - 1, 0).threat(), Threat::Suspicious);
+        assert_eq!(scanned(MALICIOUS_THRESHOLD, 0).threat(), Threat::Malicious);
+        assert_eq!(Lookup::Listed { family: None, tags: vec![] }.threat(), Threat::Malicious);
+        assert_eq!(Lookup::Unknown.threat(), Threat::Unknown);
+        assert_eq!(Lookup::Failed { error: LookupError::RateLimited }.threat(), Threat::Error);
+    }
+
+    #[test]
+    fn only_sha256_hashes_are_sent() {
+        assert!(is_sha256(SHA256_ABC));
+        assert!(!is_sha256(MD5_ABC));
+        assert!(!is_sha256(&format!("{}/x", &SHA256_ABC[..62])));
     }
 
     #[test]

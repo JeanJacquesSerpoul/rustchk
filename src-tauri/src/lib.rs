@@ -1,5 +1,8 @@
+mod authenticode;
 mod hashing;
 mod openpgp;
+mod reputation;
+mod secret;
 mod shell;
 mod sidecar;
 
@@ -7,7 +10,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use rustchk_core::{AppError, FileReport, KeyInfo, Lang, Progress, Sidecar, SignatureStatus};
+use rustchk_core::{
+    is_sha256, AppError, CodeSignature, FileReport, KeyInfo, Lang, Progress, ReputationSettings, ServiceReport,
+    Sidecar, SignatureStatus,
+};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_window_state::StateFlags;
@@ -102,10 +108,48 @@ fn find_sidecar(path: String) -> Option<Sidecar> {
     sidecar::find(Path::new(&path))
 }
 
+fn app_data_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
+    app.path().app_data_dir().map_err(|e| AppError::Internal { detail: e.to_string() })
+}
+
 /// Trousseau OpenPGP de l'application (`%APPDATA%\<identifiant>\keys`).
 fn keyring(app: &AppHandle) -> Result<openpgp::Keyring, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| AppError::Internal { detail: e.to_string() })?;
-    Ok(openpgp::Keyring::new(dir.join("keys")))
+    Ok(openpgp::Keyring::new(app_data_dir(app)?.join("keys")))
+}
+
+/// Réglages de l'analyse en ligne (`%APPDATA%\<identifiant>\reputation.json`).
+fn reputation_store(app: &AppHandle) -> Result<reputation::SettingsStore, AppError> {
+    Ok(reputation::SettingsStore::new(app_data_dir(app)?.join("reputation.json")))
+}
+
+/// Signature Authenticode du fichier choisi (Windows uniquement).
+#[tauri::command]
+async fn check_code_signature(path: String) -> Result<CodeSignature, AppError> {
+    tauri::async_runtime::spawn_blocking(move || authenticode::check(Path::new(&path)))
+        .await
+        .map_err(|e| AppError::Internal { detail: e.to_string() })
+}
+
+#[tauri::command]
+fn get_reputation_settings(app: AppHandle) -> Result<ReputationSettings, AppError> {
+    Ok(reputation_store(&app)?.load())
+}
+
+#[tauri::command]
+fn set_reputation_settings(app: AppHandle, settings: ReputationSettings) -> Result<(), AppError> {
+    reputation_store(&app)?.save(&settings)
+}
+
+/// Cherche l'empreinte SHA-256 auprès des services activés ; liste vide si l'analyse est désactivée.
+#[tauri::command]
+async fn check_reputation(app: AppHandle, sha256: String) -> Result<Vec<ServiceReport>, AppError> {
+    if !is_sha256(&sha256) {
+        return Err(AppError::InvalidHash);
+    }
+    let settings = reputation_store(&app)?.load();
+    tauri::async_runtime::spawn_blocking(move || reputation::check(&settings, &sha256.to_ascii_lowercase()))
+        .await
+        .map_err(|e| AppError::Internal { detail: e.to_string() })
 }
 
 /// Authentifie un fichier de checksums (`path`) avec les clés du trousseau.
@@ -202,6 +246,10 @@ pub fn run() {
             list_keys,
             import_key,
             remove_key,
+            check_code_signature,
+            get_reputation_settings,
+            set_reputation_settings,
+            check_reputation,
             shell_status,
             shell_set,
         ])
