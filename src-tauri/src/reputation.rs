@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use rustchk_core::{AppError, Lookup, LookupError, ReputationSettings, Service, ServiceReport};
+use rustchk_core::{AppError, KeyStorage, Lookup, LookupError, ReputationSettings, Service, ServiceReport};
 use serde_json::Value;
 
 use crate::secret;
@@ -16,28 +16,37 @@ use crate::secret;
 const MALWAREBAZAAR_URL: &str = "https://mb-api.abuse.ch/api/v1/";
 const VIRUSTOTAL_URL: &str = "https://www.virustotal.com/api/v3/files/";
 
+/// Nom sous lequel les clés sont rangées dans le trousseau Linux (une entrée par service).
+const KEYRING_SERVICE: &str = "app.rustchk";
+
 /// Réglages persistants de l'analyse en ligne.
 pub struct SettingsStore {
     path: PathBuf,
+    keyring_service: String,
 }
 
 impl SettingsStore {
     pub fn new(path: PathBuf) -> Self {
-        SettingsStore { path }
+        SettingsStore { path, keyring_service: KEYRING_SERVICE.to_string() }
     }
 
     /// Réglages enregistrés, clés déchiffrées ; ceux par défaut (analyse désactivée) si le fichier manque
-    /// ou est illisible. Une clé indéchiffrable (fichier copié depuis un autre compte) est vidée.
+    /// ou est illisible. Une clé introuvable (fichier copié depuis un autre compte, trousseau verrouillé)
+    /// est vidée.
     pub fn load(&self) -> ReputationSettings {
         let stored: ReputationSettings =
             fs::read(&self.path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        let open = |service: Service, value: &str| {
+            secret::open(&self.keyring_service, service.label(), value).unwrap_or_default()
+        };
         let settings = ReputationSettings {
             enabled: stored.enabled,
-            malwarebazaar_key: secret::open(&stored.malwarebazaar_key).unwrap_or_default(),
-            virustotal_key: secret::open(&stored.virustotal_key).unwrap_or_default(),
+            malwarebazaar_key: open(Service::MalwareBazaar, &stored.malwarebazaar_key),
+            virustotal_key: open(Service::VirusTotal, &stored.virustotal_key),
         };
-        // Clés en clair d'une version précédente : les chiffrer sans attendre le prochain enregistrement.
-        if !secret::is_sealed(&stored.malwarebazaar_key) || !secret::is_sealed(&stored.virustotal_key) {
+        // Clés en clair d'une version précédente : les protéger sans attendre le prochain enregistrement.
+        let plain = !secret::is_sealed(&stored.malwarebazaar_key) || !secret::is_sealed(&stored.virustotal_key);
+        if plain && secret::storage() != KeyStorage::Plain {
             let _ = self.save(&settings);
         }
         settings
@@ -45,7 +54,9 @@ impl SettingsStore {
 
     pub fn save(&self, settings: &ReputationSettings) -> Result<(), AppError> {
         let write_error = |detail: String| AppError::SettingsWrite { detail };
-        let sealed = |service| secret::seal(settings.key(service)).map_err(write_error);
+        let sealed = |service: Service| {
+            secret::seal(&self.keyring_service, service.label(), settings.key(service)).map_err(write_error)
+        };
         let stored = ReputationSettings {
             enabled: settings.enabled,
             malwarebazaar_key: sealed(Service::MalwareBazaar)?,
@@ -172,6 +183,22 @@ fn parse_virustotal(status: u16, body: &str) -> Lookup {
 mod tests {
     use super::*;
 
+    impl SettingsStore {
+        /// Magasin de test : son propre nom dans le trousseau Linux, pour ne jamais toucher aux clés réelles
+        /// et ne pas mélanger deux tests lancés en parallèle.
+        fn for_test(path: PathBuf, keyring_service: &str) -> Self {
+            SettingsStore { path, keyring_service: keyring_service.to_string() }
+        }
+
+        /// Retire les clés du trousseau et le fichier.
+        fn clear(&self) {
+            let _ = self.save(&ReputationSettings::default());
+            if let Some(dir) = self.path.parent() {
+                let _ = fs::remove_dir_all(dir);
+            }
+        }
+    }
+
     #[test]
     fn malwarebazaar_responses() {
         let listed = r#"{"query_status":"ok","data":[{"sha256_hash":"ab","signature":"LummaStealer","tags":["exe","stealer"]}]}"#;
@@ -234,7 +261,7 @@ mod tests {
     #[test]
     fn settings_round_trip_and_trim_keys() {
         let dir = std::env::temp_dir().join(format!("rustchk-settings-{}", std::process::id()));
-        let store = SettingsStore::new(dir.join("reputation.json"));
+        let store = SettingsStore::for_test(dir.join("reputation.json"), "app.rustchk.test-round-trip");
         assert_eq!(store.load(), ReputationSettings::default());
         let settings =
             ReputationSettings { enabled: true, malwarebazaar_key: " mb \n".into(), virustotal_key: String::new() };
@@ -245,14 +272,15 @@ mod tests {
         assert_eq!(loaded.services(), vec![Service::MalwareBazaar]);
         // Analyse désactivée : rien n'est envoyé, même avec des clés.
         assert!(check(&ReputationSettings { enabled: false, ..loaded }, &"0".repeat(64)).is_empty());
-        let _ = fs::remove_dir_all(dir);
+        store.clear();
     }
 
     #[test]
     fn keys_are_encrypted_on_disk_and_plain_keys_migrated() {
         let dir = std::env::temp_dir().join(format!("rustchk-secret-{}", std::process::id()));
         let path = dir.join("reputation.json");
-        let store = SettingsStore::new(path.clone());
+        let store = SettingsStore::for_test(path.clone(), "app.rustchk.test-migration");
+        let protected = secret::storage() != KeyStorage::Plain;
         let settings = ReputationSettings {
             enabled: true,
             malwarebazaar_key: "mb-secret".into(),
@@ -260,18 +288,23 @@ mod tests {
         };
         store.save(&settings).unwrap();
         let on_disk = fs::read_to_string(&path).unwrap();
-        assert_eq!(on_disk.contains("mb-secret"), !cfg!(windows));
+        assert_eq!(on_disk.contains("mb-secret"), !protected);
         assert_eq!(store.load(), settings);
 
-        // Fichier d'une version précédente, clés en clair : chiffré dès la lecture.
+        // Fichier d'une version précédente, clés en clair : protégé dès la lecture.
         fs::write(&path, r#"{"enabled":true,"malwarebazaar_key":"mb-secret","virustotal_key":""}"#).unwrap();
         assert_eq!(store.load().malwarebazaar_key, "mb-secret");
-        assert_eq!(fs::read_to_string(&path).unwrap().contains("mb-secret"), !cfg!(windows));
+        assert_eq!(fs::read_to_string(&path).unwrap().contains("mb-secret"), !protected);
         assert_eq!(store.load().malwarebazaar_key, "mb-secret");
 
-        // Clé chiffrée par un autre compte : vidée plutôt que d'envoyer n'importe quoi.
+        // Clé chiffrée par un autre compte, ou marqueur sans entrée dans le trousseau : vidée plutôt que
+        // d'envoyer n'importe quoi.
         fs::write(&path, r#"{"enabled":true,"malwarebazaar_key":"dpapi:00ff","virustotal_key":""}"#).unwrap();
         assert!(store.load().services().is_empty());
-        let _ = fs::remove_dir_all(dir);
+        store.clear();
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, r#"{"enabled":true,"malwarebazaar_key":"keyring:","virustotal_key":""}"#).unwrap();
+        assert!(store.load().services().is_empty());
+        store.clear();
     }
 }

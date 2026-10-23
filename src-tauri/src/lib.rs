@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use rustchk_core::{
-    is_sha256, AppError, CodeSignature, FileReport, KeyInfo, Lang, Progress, ReputationSettings, ServiceReport,
-    Sidecar, SignatureStatus,
+    is_sha256, AppError, CodeSignature, FileReport, KeyInfo, KeyStorage, Lang, Progress, ReputationSettings,
+    ServiceReport, Sidecar, SignatureStatus,
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
@@ -135,6 +135,14 @@ fn get_reputation_settings(app: AppHandle) -> Result<ReputationSettings, AppErro
     Ok(reputation_store(&app)?.load())
 }
 
+/// Protection appliquée aux clés d'API sur ce système.
+#[tauri::command]
+async fn key_storage() -> Result<KeyStorage, AppError> {
+    tauri::async_runtime::spawn_blocking(secret::storage)
+        .await
+        .map_err(|e| AppError::Internal { detail: e.to_string() })
+}
+
 #[tauri::command]
 fn set_reputation_settings(app: AppHandle, settings: ReputationSettings) -> Result<(), AppError> {
     reputation_store(&app)?.save(&settings)
@@ -249,6 +257,7 @@ pub fn run() {
             check_code_signature,
             get_reputation_settings,
             set_reputation_settings,
+            key_storage,
             check_reputation,
             shell_status,
             shell_set,

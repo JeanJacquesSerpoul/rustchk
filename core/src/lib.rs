@@ -236,6 +236,19 @@ impl ReputationSettings {
     }
 }
 
+/// Protection des clés d'API enregistrées, selon ce que le système offre.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyStorage {
+    /// Windows : chiffrées pour le compte de l'utilisateur (DPAPI).
+    Dpapi,
+    /// Linux : rangées dans le trousseau du bureau (GNOME Keyring, KWallet…) via Secret Service.
+    SecretService,
+    /// macOS : rangées dans le trousseau de session (Keychain).
+    Keychain,
+    /// Aucun trousseau disponible : en clair dans le profil de l'utilisateur.
+    Plain,
+}
+
 /// Réponse d'un service de réputation pour une empreinte.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Lookup {

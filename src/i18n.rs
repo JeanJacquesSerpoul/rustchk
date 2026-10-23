@@ -4,7 +4,8 @@
 //! (`Lang::De`…) fait échouer la compilation tant qu'un texte manque.
 
 use rustchk_core::{
-    Algo, AppError, CodeSignatureProblem, InvalidReason, KeyInfo, Lang, Lookup, LookupError, Service, Threat,
+    Algo, AppError, CodeSignatureProblem, InvalidReason, KeyInfo, KeyStorage, Lang, Lookup, LookupError, Service,
+    Threat,
 };
 
 #[derive(Clone, Copy)]
@@ -367,11 +368,25 @@ impl T {
             Service::VirusTotal => self.pick("Clé personnelle VirusTotal", "Personal VirusTotal key"),
         }
     }
-    pub fn reputation_keys_storage(self) -> &'static str {
-        self.pick(
-            "Les clés sont enregistrées chiffrées pour votre compte Windows (DPAPI), dans reputation.json à côté du trousseau.",
-            "Keys are stored encrypted for your Windows account (DPAPI), in reputation.json next to the keyring.",
-        )
+    pub fn reputation_keys_storage(self, storage: KeyStorage) -> &'static str {
+        match storage {
+            KeyStorage::Dpapi => self.pick(
+                "Les clés sont enregistrées chiffrées pour votre compte Windows (DPAPI), dans reputation.json à côté du trousseau.",
+                "Keys are stored encrypted for your Windows account (DPAPI), in reputation.json next to the keyring.",
+            ),
+            KeyStorage::SecretService => self.pick(
+                "Les clés sont rangées dans le trousseau de votre session (GNOME Keyring, KWallet…), chiffré et déverrouillé à la connexion.",
+                "Keys are kept in your session keyring (GNOME Keyring, KWallet…), encrypted and unlocked when you log in.",
+            ),
+            KeyStorage::Keychain => self.pick(
+                "Les clés sont rangées dans le trousseau macOS de votre session (Keychain), sous « app.rustchk ».",
+                "Keys are kept in your macOS login keychain (Keychain), under \"app.rustchk\".",
+            ),
+            KeyStorage::Plain => self.pick(
+                "Aucun trousseau disponible : les clés sont enregistrées en clair dans reputation.json, dans le profil utilisateur.",
+                "No keyring available: keys are stored in plain text in reputation.json, in the user profile.",
+            ),
+        }
     }
     pub fn save(self) -> &'static str {
         self.pick("Enregistrer", "Save")
